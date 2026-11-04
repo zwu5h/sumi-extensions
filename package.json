@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node scripts/test_mangadex_source.mjs && node scripts/test_web_sources.mjs",
+    "test": "node scripts/test_mangadex_source.mjs && node scripts/test_web_sources.mjs && node scripts/test_toontop_source.mjs",
     "test:web": "node scripts/test_web_sources.mjs"
   },
   "devDependencies": {"linkedom": "0.18.15"}

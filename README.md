@@ -14,6 +14,7 @@ https://raw.githubusercontent.com/zwu5h/sumi-extensions/main/repository.json
 - **MangaDex · Deutsch**
 - **MangaDex · English**
 - **MangaKatana · English** — manga and manhwa
+- **ToonTop · English** — requires Sumi's image-referer support
 
 Use the current Sumi build with scoped subdomain permissions. These extensions use
 Sumi's own source API; they are not Paperback extensions. No additional backend is
@@ -24,7 +25,8 @@ repository in Sumi before installing them from this one. Saved library titles an
 reading progress remain on the device; the extension IDs are unchanged.
 
 See [MangaDex setup](extensions/mangadex/README.md),
-[MangaKatana setup](extensions/mangakatana/README.md) and the
+[MangaKatana setup](extensions/mangakatana/README.md),
+[ToonTop setup](extensions/toontop/README.md) and the
 [provider research and limitations](docs/provider-research.md).
 
 ## Development
@@ -38,9 +40,11 @@ python3 scripts/build_all_repositories.py
 python3 scripts/build_all_repositories.py --check
 node scripts/test_mangadex_source.mjs
 node scripts/test_web_sources.mjs
+node scripts/test_toontop_source.mjs
 # Optional real API check:
 node scripts/test_mangadex_source.mjs --live
 node scripts/test_web_sources.mjs --live
+node scripts/test_toontop_source.mjs --live
 ```
 
 Edit the adapter template, then regenerate both indexes and content-addressed scripts.

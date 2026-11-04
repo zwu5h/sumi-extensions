@@ -9,6 +9,7 @@ comic pages.
 | --- | --- | --- |
 | MangaDex | Published API; existing German and English adapters | Retained |
 | MangaKatana | Public search/title pages and a literal page URL array; direct image response succeeds | Added English manga/manhwa adapter with content exclusions |
+| ToonTop | Public Next.js page JSON, full chapter GET endpoint, image downloads require the website-origin Referer | Added English adapter; requires Sumi image-referer support; live search → 208 chapters → 27 pages and image bytes verified |
 | MangaPill | Search and chapter pages work; direct image requests returned HTTP 403 | Not published as a working source |
 | Comick | Official docs describe a public catalog API; direct requests from this connection returned a browser challenge | Not published as a working source |
 | MangaPDF | Official docs describe a developer API; both documented API hosts returned HTTP 521 | Not published as a working source |
@@ -22,11 +23,12 @@ it as a licensed or App Store approved integration.
 
 ## Mature content
 
-No explicitly pornographic provider or catalog is added. The website adapter excludes
-adult/explicit genre labels and fails closed on missing genres. The exclusions also
-cover ambiguous sexual-content categories rather than treating them as proof that a
-title is suitable. Nonsexual adult-audience genres are not excluded merely because
-they target older readers. No NSFW-unlock switch is introduced.
+MangaKatana excludes adult/explicit genre labels and fails closed on missing genres.
+ToonTop uses Sumi's per-source content preference: adult/uncensored/censored-cover
+flags, excluded genres and missing content metadata are hidden by default, including
+when saved chapters are opened. Its explicit opt-in permits the provider's mature
+catalog. Both depend on provider metadata and do not establish an age classification.
+MangaDex also supports the per-source content preference.
 
 Apple's guideline 1.1.4 prohibits overtly sexual/pornographic material. The conditional
 treatment of incidental mature UGC under 1.2 is not a general permission to distribute

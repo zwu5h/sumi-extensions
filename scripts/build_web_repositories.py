@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE = "https://raw.githubusercontent.com/zwu5h/sumi-extensions/main"
 PROVIDERS = [
     ("mangakatana", "MangaKatana · English", ["mangakatana.com", "*.mangakatana.com"], "https://mangakatana.com/"),
+    ("toontop", "ToonTop · English", ["toontop.io", "api.toontop.io", "rx.toontop.io"], "https://toontop.io/"),
 ]
 
 
@@ -25,6 +26,8 @@ def generated_files():
             "script": f"{BASE}/{path}", "sha256": digest, "hosts": hosts,
             "website": website, "author": "zwu5h · unofficial adapter",
         }]}
+        if provider == "toontop":
+            manifest["extensions"][0]["imageReferer"] = "https://toontop.io/"
         files[f"extensions/{provider}/repository.json"] = (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     return files
 
