@@ -4,6 +4,15 @@ const config = {
 };
 const toonBook = /^\/[a-z0-9][a-z0-9_-]*$/;
 const toonChapter = /^\/[a-z0-9][a-z0-9_-]*\/[a-z0-9][a-z0-9_.-]*$/;
+const toonSorts = [
+  ['best_match', 'Best Match'], ['latest', 'Latest Updated'], ['newest', 'Recently Added'],
+  ['popular', 'Most Followed'], ['rating', 'Highest Rating'],
+  ['views_today', 'Most Viewed: Today'], ['views_7days', 'Most Viewed: 7 Days'],
+  ['views_30days', 'Most Viewed: 30 Days'], ['views', 'Most Viewed: All Time'],
+  ['chapters', 'Most Chapters']
+];
+// The website lists A-Z, but its server returns no pagination for alphabetical.
+const toonStatuses = ['ongoing', 'completed', 'hiatus', 'cancelled'];
 
 // Parse only Next.js's published JSON data; never evaluate website JavaScript.
 async function toonData(api, url) {
@@ -46,20 +55,65 @@ function toonOrder(left, right) {
   return left.id.localeCompare(right.id, 'en', {numeric: true});
 }
 
+const toonOptions = values => values.map(id => ({id, name: id[0].toUpperCase() + id.slice(1)}));
+const toonGroups = [
+  {id: 'type', name: 'Type', options: toonOptions(['manga', 'manhwa', 'manhua'])},
+  {id: 'content_rating', name: 'Content rating', options: toonOptions(['safe', 'suggestive', 'erotica', 'pornographic'])},
+  {id: 'demographic', name: 'Demographic', multiple: true, options: toonOptions(['shounen', 'shoujo', 'seinen', 'josei'])},
+  {id: 'format', name: 'Formats', multiple: true, options: [
+    {id: '4-koma', name: '4-Koma'}, {id: 'adaptation', name: 'Adaptation'},
+    {id: 'full-color', name: 'Full Color'}, {id: 'oneshot', name: 'Oneshot'}, {id: 'web-comic', name: 'Web Comic'}
+  ]},
+  {id: 'min_ch', name: 'Minimum chapters', options: []},
+  {id: 'max_ch', name: 'Maximum chapters', options: []},
+  {id: 'author', name: 'Author', options: []},
+  {id: 'tag', name: 'Tag', options: []},
+  {id: 'window', name: 'Time period', options: [{id: 'today', name: 'Today'}, {id: 'week', name: 'This week'}, {id: 'month', name: 'This month'}]},
+  {id: 'uncensored', name: 'Edition: Uncensored', options: [{id: 'true', name: 'Uncensored'}]},
+  {id: 'raw', name: 'Edition: Raw', options: [{id: 'true', name: 'Raw'}]}
+];
 const source = {
-  async filters() {
-    return {tags: [], statuses: [], sortOrders: [], supportsNSFW: true};
+  async filters(_, api) {
+    const response = await api.request('https://api.toontop.io/genres');
+    const result = response.json();
+    if (result.success !== true || !Array.isArray(result.data?.items)) throw new Error('ToonTop genre list changed.');
+    if (!result.data.items.length || result.data.items.some(item => typeof item.slug !== 'string' || !/^[a-z0-9-]+$/.test(item.slug) || typeof item.name !== 'string' || !item.name.trim())) {
+      throw new Error('ToonTop returned invalid genres.');
+    }
+    return {tags: result.data.items.map(item => ({id: item.slug, name: item.name})),
+      supportsExcludedTags: true, tagModes: ['AND'], groups: toonGroups, statuses: toonStatuses.map(id => ({id, name: id[0].toUpperCase() + id.slice(1)})),
+      sortOrders: toonSorts.map(([id, name]) => ({id, name})), supportsNSFW: true};
   },
-  async search({query, allowNSFW}, api) {
+  async search({query, allowNSFW, sort = '', status = '', tags = '[]', excludedTags = '[]', filters = '{}', page}, api) {
     const term = String(query || '').trim();
-    const url = new URL(term ? '/search' : '/latest', config.origin);
+    if (sort && !toonSorts.some(([id]) => id === sort)) throw new Error('Invalid ToonTop sort order.');
+    if (status && !toonStatuses.includes(status)) throw new Error('Invalid ToonTop publication status.');
+    const number = page === undefined ? 1 : Number(page);
+    if (!Number.isSafeInteger(number) || number < 1 || number > 10000) throw new Error('Invalid ToonTop catalog page.');
+    const url = new URL('/search', config.origin);
     if (term) url.searchParams.set('q', term);
+    if (sort !== 'best_match' && (sort || !term)) url.searchParams.set('sort', sort || 'latest');
+    if (status) url.searchParams.set('status', status);
+    for (const [key, raw] of [['genres', tags], ['exclude', excludedTags]]) {
+      const values = JSON.parse(raw);
+      if (!Array.isArray(values) || values.length > 500 || values.some(v => typeof v !== 'string' || !/^[a-z0-9-]+$/.test(v))) throw new Error('Invalid ToonTop genres.');
+      if (values.length) url.searchParams.set(key, [...new Set(values)].join(','));
+    }
+    const extra = JSON.parse(filters);
+    if (!extra || typeof extra !== 'object' || Array.isArray(extra)) throw new Error('Invalid ToonTop filters.');
+    for (const [key, values] of Object.entries(extra)) {
+      const group = toonGroups.find(group => group.id === key);
+      if (!group || !Array.isArray(values) || (!group.multiple && values.length > 1) || values.some(v => typeof v !== 'string' || v.length > 300 || (group.options.length && !group.options.some(option => option.id === v)))) throw new Error('Invalid ToonTop filter.');
+      if (['min_ch', 'max_ch'].includes(key) && values.some(v => !/^[0-9]{1,6}$/.test(v))) throw new Error('Invalid ToonTop chapter count.');
+      if (values.length) url.searchParams.set(key, values.join(','));
+    }
+    if (number > 1) url.searchParams.set('page', String(number));
     const data = await toonData(api, url.href);
-    const items = term ? data.ssrItems : data.items;
+    const items = data.ssrItems;
     if (!Array.isArray(items) || (term && data.ssrQuery !== term)) {
       throw new Error('ToonTop search data changed or the query was not applied.');
     }
-    return webUnique(items.filter(item => toonAllowed(item, allowNSFW)).map(item => {
+    const titles = webUnique(items.filter(item => toonAllowed(item, allowNSFW)).map(item => {
       const book = webLink(item.url, toonBook);
       if (!item.name) throw new Error('ToonTop returned a title without a name.');
       return {id: book.pathname, title: String(item.name),
@@ -67,6 +121,13 @@ const source = {
         synopsis: String(item.summary || ''), genre: toonNames(item.genres).join(' · '),
         cover: item.cover ? webImage(item.cover) : null};
     })).slice(0, 200);
+    // Keep the array contract for apps predating paginated catalogs.
+    if (page === undefined) return titles;
+    const pagination = data.ssrPagination;
+    if (!pagination || pagination.page !== number || typeof pagination.has_next !== 'boolean') {
+      throw new Error('ToonTop returned invalid catalog pagination.');
+    }
+    return {titles, nextPage: pagination.has_next ? String(number + 1) : null};
   },
   async chapters({mangaID, allowNSFW}, api) {
     const manga = await toonDetail(api, mangaID, allowNSFW);

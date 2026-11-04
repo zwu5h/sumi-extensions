@@ -22,7 +22,7 @@ def generated_files():
         path = f"extensions/{provider}/dist/{provider}-en-{digest[:16]}.js"
         files[path] = code
         manifest = {"schemaVersion": 1, "name": name, "extensions": [{
-            "id": f"org.zwu5h.{provider}.en", "name": name, "version": "1.0.0", "apiVersion": 1,
+            "id": f"org.zwu5h.{provider}.en", "name": name, "version": "1.2.1" if provider == "toontop" else "1.0.0", "apiVersion": 1,
             "script": f"{BASE}/{path}", "sha256": digest, "hosts": hosts,
             "website": website, "author": "zwu5h · unofficial adapter",
         }]}

@@ -33,7 +33,7 @@ const request = handler => ({request: async value => {
   const text = typeof valueOrText === 'string' ? valueOrText : JSON.stringify(valueOrText);
   return {text, json: () => JSON.parse(text)};
 }});
-const call = async (operation, input, handler = () => assert.fail('Unexpected network request')) =>
+const call = async (operation, input, handler = () => ({success: true, data: {items: [{slug: 'action', name: 'Action'}, {slug: 'romance', name: 'Romance'}]}})) =>
   JSON.parse(await invoke(operation, input, request(handler), DOMParser));
 const list = (chapters = entries) => ({success: true, data: {chapters}});
 
@@ -46,7 +46,7 @@ const titles = await call('search', {query: 'a&genre=adult'}, url => {
 });
 assert.deepEqual(titles, [{id: '/example', title: 'Example', author: 'Creator', synopsis: 'Summary', genre: 'Action', cover: image}]);
 assert.equal((await call('search', {query: ''}, url => {
-  assert.equal(url.pathname, '/latest'); return html({items: [book, book]});
+  assert.equal(url.pathname, '/search'); assert.equal(url.searchParams.get('sort'), 'latest'); return search([book, book], '');
 })).length, 1);
 assert.deepEqual(await call('search', {query: 'example'}, () => search([])), []);
 await assert.rejects(call('search', {query: 'example'}, () => search([book], '')), /query was not applied/);
@@ -59,6 +59,55 @@ for (const changes of [{isAdult: true}, {isAdult: undefined}, {genres: []}, {gen
   await assert.rejects(call('pages', {mangaID: '/example', chapterID: '/example/chapter-1'}, () => chapter(item)), /content setting/);
 }
 assert.deepEqual(await call('search', {query: 'example', allowNSFW: 'true'}, () => search([{...book, isDeleted: true}])), []);
+const filters = await call('filters', {});
+assert(filters.sortOrders.some(item => item.id === 'views'));
+assert(filters.sortOrders.some(item => item.id === 'newest'));
+assert(filters.statuses.some(item => item.id === 'completed'));
+assert(filters.supportsExcludedTags);
+assert.deepEqual(filters.tagModes, ['AND']);
+assert(filters.tags.some(item => item.id === 'action'));
+assert.deepEqual(filters.groups.map(group => group.id), ['type', 'content_rating', 'demographic', 'format', 'min_ch', 'max_ch', 'author', 'tag', 'window', 'uncensored', 'raw']);
+assert(!filters.sortOrders.some(item => item.id === 'alphabetical'), 'Do not offer the provider\'s broken alphabetical sort');
+await assert.rejects(call('filters', {}, () => ({success: true, data: {items: [{slug: 'action', name: ''}]}})), /invalid genres/);
+// Exercise every native field together, including edition flags, on another page.
+const native = {type: ['manhwa'], content_rating: ['safe'], demographic: ['shounen', 'seinen'],
+  format: ['full-color', 'web-comic'], min_ch: ['20'], max_ch: ['300'], author: ['A & B'],
+  tag: ['martial arts'], window: ['week'], uncensored: ['true'], raw: ['true']};
+await call('search', {filters: JSON.stringify(native), page: '2'}, url => {
+  for (const [key, value] of Object.entries(native)) assert.equal(url.searchParams.get(key), value.join(','));
+  assert.equal(url.searchParams.get('page'), '2');
+  return html({ssrItems: [book], ssrPagination: {page: 2, has_next: false}});
+});
+const extra = {type: ['manhwa'], demographic: ['shounen', 'seinen'], min_ch: ['20'], author: ['A & B']};
+await call('search', {query: 'example', tags: '["action"]', excludedTags: '["romance"]', filters: JSON.stringify(extra), sort: 'views_7days'}, url => {
+  assert.equal(url.searchParams.get('genres'), 'action');
+  assert.equal(url.searchParams.get('exclude'), 'romance');
+  for (const [key, value] of Object.entries(extra)) assert.equal(url.searchParams.get(key), value.join(','));
+  assert.equal(url.searchParams.get('sort'), 'views_7days');
+  return search();
+});
+for (const filters of ['{"type":["invalid"]}', '{"min_ch":["-1"]}', '{"unknown":["true"]}', '{"raw":["false"]}', '{"window":["year"]}', '{"format":["unknown"]}', '{"content_rating":["invalid"]}']) {
+  await assert.rejects(call('search', {filters}), /Invalid ToonTop/);
+}
+
+for (const {id: sort} of filters.sortOrders) {
+  const result = await call('search', {query: 'example', sort, status: 'completed', page: '2'}, url => {
+    assert.equal(url.searchParams.get('sort'), sort === 'best_match' ? null : sort);
+    assert.equal(url.searchParams.get('status'), 'completed');
+    assert.equal(url.searchParams.get('page'), '2');
+    assert.equal(url.searchParams.get('q'), 'example');
+    return html({ssrItems: [book], ssrQuery: 'example', ssrPagination: {page: 2, has_next: true}});
+  });
+  assert.equal(result.titles.length, 1); assert.equal(result.nextPage, '3');
+}
+const hiddenPage = await call('search', {page: '1'}, () => html({ssrItems: [{...book, isAdult: true}], ssrPagination: {page: 1, has_next: true}}));
+assert.deepEqual(hiddenPage, {titles: [], nextPage: '2'});
+const lastPage = await call('search', {page: '2'}, () => html({ssrItems: [], ssrPagination: {page: 2, has_next: false}}));
+assert.deepEqual(lastPage, {titles: [], nextPage: null});
+for (const input of [{page: '0'}, {page: '1.5'}, {page: '10001'}, {sort: 'invalid'}, {status: 'invalid'}]) {
+  await assert.rejects(call('search', input), /Invalid ToonTop/);
+}
+await assert.rejects(call('search', {page: '2'}, () => html({ssrItems: [], ssrPagination: {page: 1, has_next: true}})), /invalid catalog pagination/);
 let requests = [];
 const chapters = await call('chapters', {mangaID: '/example'}, url => {
   requests.push(url.href);
@@ -96,14 +145,42 @@ console.log('PASS: ToonTop generated checksum, query encoding, full chapter list
 
 if (process.argv.includes('--live')) {
   const liveAPI = {request: async url => {
-    const response = await fetch(url, {headers: {'User-Agent': 'Sumi/1.0'}, signal: AbortSignal.timeout(15000)});
+    const response = await fetch(url, {headers: {'User-Agent': 'Mozilla/5.0'}, signal: AbortSignal.timeout(15000)});
     assert(response.ok, 'HTTP ' + response.status + ' for ' + new URL(url).hostname);
     const text = await response.text();
     assert(Buffer.byteLength(text) <= 4 * 1024 * 1024, 'Sumi text response limit');
     return {text, json: () => JSON.parse(text)};
   }};
   const live = async (operation, input) => JSON.parse(await invoke(operation, input, liveAPI, DOMParser));
+  const liveFilters = await live('filters', {});
+  assert(liveFilters.tags.length > 20);
+  // Verify provider metadata, not just that a filtered request returns something.
+  const checked = async (input, check) => JSON.parse(await invoke('search', {page: '1', allowNSFW: 'true', ...input}, {request: async url => {
+    const response = await liveAPI.request(url);
+    const document = new DOMParser().parseFromString(response.text, 'text/html');
+    const props = JSON.parse(document.querySelector('script#__NEXT_DATA__').textContent).props.pageProps;
+    assert(props.ssrItems.length > 0);
+    props.ssrItems.forEach(check);
+    return response;
+  }}, DOMParser));
+  await checked({tags: '["action","fantasy"]', excludedTags: '["romance"]', filters: '{"min_ch":["100"]}', status: 'ongoing'}, item => {
+    const genres = item.genres.map(genre => genre.slug);
+    assert(genres.includes('action') && genres.includes('fantasy') && !genres.includes('romance'));
+    assert(item.stats.chaptersCount >= 100 && item.status === 'ongoing');
+  });
+  await checked({filters: '{"uncensored":["true"]}'}, item => assert.equal(item.isUncensored, true));
+  await checked({filters: '{"raw":["true"]}'}, item => assert.equal(item.isRaw, true));
+  const advanced = await live('search', {tags: '["action"]', excludedTags: '["romance"]', filters: JSON.stringify({type: ['manhwa'], min_ch: ['50']}), sort: 'views_7days', page: '1'});
+  assert(advanced.titles.length > 0, 'Expected results for native advanced filters');
   assert((await live('search', {query: ''})).length > 0, 'Expected a browsing catalog');
+  const first = await live('search', {sort: 'views', status: 'completed', page: '1', allowNSFW: 'true'});
+  assert(first.nextPage, 'Expected additional catalog pages');
+  const second = await live('search', {sort: 'views', status: 'completed', page: first.nextPage, allowNSFW: 'true'});
+  assert(first.titles.length > 0 && second.titles.length > 0);
+  assert(second.titles.every(item => !first.titles.some(prior => prior.id === item.id)), 'Next page must contain different titles');
+  const views = await live('search', {sort: 'views', page: '1'});
+  const newest = await live('search', {sort: 'newest', page: '1'});
+  assert.notDeepEqual(views.titles.map(item => item.id), newest.titles.map(item => item.id), 'Sort must affect the provider catalog');
   const titles = await live('search', {query: 'Absolute Sword Sense'});
   const title = titles.find(item => item.id === '/absolute-sword-sense');
   assert(title, 'Expected the requested live title');
