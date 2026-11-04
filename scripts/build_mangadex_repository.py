@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import re
+from build_web_repositories import aggregate
 
 ROOT = Path(__file__).resolve().parents[1]
 DIRECTORY = ROOT / "extensions/mangadex"
@@ -50,7 +51,7 @@ def build(check=False):
 
     # The root index is the stable installation URL; retain the per-source index too.
     root_index = ROOT / "repository.json"
-    content = files["repository.json"]
+    content = aggregate()
     if check:
         if not root_index.exists() or root_index.read_bytes() != content:
             raise ValueError("Regenerate repository.json")
