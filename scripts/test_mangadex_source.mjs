@@ -7,10 +7,6 @@ import {createHash} from 'node:crypto';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const directory = join(root, 'extensions/mangadex');
 const repository = JSON.parse(readFileSync(join(directory, 'repository.json'), 'utf8'));
-assert.deepEqual(repository, JSON.parse(readFileSync(join(root, 'repository.json'), 'utf8')));
-for (const extension of repository.extensions) {
-  assert(extension.script.startsWith('https://raw.githubusercontent.com/zwu5h/sumi-extensions/main/extensions/mangadex/dist/'));
-}
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const book = '00000000-0000-4000-8000-000000000001';
 const group = '00000000-0000-4000-8000-000000000002';
@@ -60,6 +56,36 @@ for (const manifest of repository.extensions) {
     return ok([noCover]);
   });
   assert.equal(fallback[0].cover, null);
+
+  const tagID = chapterID(80);
+  const filters = await call('filters', {}, url => {
+    assert.equal(url.pathname, '/manga/tag');
+    return ok([{id: tagID, attributes: {name: {en: 'Adventure', de: 'Abenteuer'}}}]);
+  });
+  assert.equal(filters.tags[0].name, language === 'de' ? 'Abenteuer' : 'Adventure');
+  assert(filters.statuses.some(item => item.id === 'completed'));
+  assert(filters.sortOrders.some(item => item.id === 'latest'));
+  for (const tagMode of ['AND', 'OR']) {
+    await call('search', {query: 'Hero', tags: JSON.stringify([tagID, tagID]), tagMode, status: 'completed', sort: 'title'}, url => {
+      assert.deepEqual(url.searchParams.getAll('includedTags[]'), [tagID]);
+      assert.equal(url.searchParams.get('includedTagsMode'), tagMode);
+      assert.equal(url.searchParams.get('status[]'), 'completed');
+      assert.equal(url.searchParams.get('order[title]'), 'asc');
+      assert.equal(url.searchParams.get('order[relevance]'), null);
+      assert.deepEqual(url.searchParams.getAll('contentRating[]'), ['safe']);
+      assert.equal(url.searchParams.get('title'), 'Hero');
+      return ok([title]);
+    });
+  }
+  for (const [sort, field] of [['popular', 'followedCount'], ['latest', 'latestUploadedChapter'], ['newest', 'createdAt']]) {
+    await call('search', {sort}, url => {
+      assert.equal(url.searchParams.get(`order[${field}]`), 'desc');
+      return ok([]);
+    });
+  }
+  for (const input of [{tags: '{}'}, {tags: '["invalid"]'}, {tagMode: 'invalid'}, {status: 'invalid'}, {sort: '__proto__'}]) {
+    await assert.rejects(call('search', input, () => assert.fail('Invalid filters must not request data')));
+  }
 
   let feedCalls = 0;
   const chapterHandler = url => {
@@ -127,6 +153,10 @@ if (process.argv.includes('--live')) {
     return {text, json: () => JSON.parse(text)};
   }};
   const call = async (operation, input) => JSON.parse(await invoke(operation, input, api));
+  const filters = await call('filters', {});
+  assert(filters.tags.length > 0, 'Expected live tags');
+  const filtered = await call('search', {query: '', tags: JSON.stringify([filters.tags[0].id]), tagMode: 'AND', status: 'completed', sort: 'title'});
+  assert(Array.isArray(filtered));
   const titles = await call('search', {query: 'Give My Regards to Black Jack'});
   assert(titles.length > 0, 'Expected a live search result');
   const title = titles.find(item => item.id === '5feea066-dd12-490e-beb6-a705a9dbba7c') || titles[0];

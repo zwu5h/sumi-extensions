@@ -66,14 +66,38 @@ function chapterTitle(attributes) {
 }
 
 const source = {
-  async search({ query }, api) {
+  async filters(_, api) {
+    const response = await getJSON(api, '/manga/tag');
+    if (!Array.isArray(response.data)) throw new Error('MangaDex returned an invalid tag list.');
+    return {
+      tags: response.data.map(tag => ({id: uuid(tag.id), name: localized(tag.attributes?.name)})),
+      statuses: ['ongoing', 'completed', 'hiatus', 'cancelled'].map(id => ({id, name: id[0].toUpperCase() + id.slice(1)})),
+      sortOrders: [
+        {id: 'popular', name: 'Most popular'}, {id: 'latest', name: 'Recently updated'},
+        {id: 'newest', name: 'Recently added'}, {id: 'title', name: 'Title A–Z'}
+      ]
+    };
+  },
+
+  async search({ query, tags = '[]', tagMode = 'AND', status = '', sort = '' }, api) {
     const term = String(query || '').trim();
+    const selectedTags = JSON.parse(tags);
+    if (!Array.isArray(selectedTags) || selectedTags.length > 500) throw new Error('Invalid tags.');
+    if (!['AND', 'OR'].includes(tagMode)) throw new Error('Invalid tag matching mode.');
+    if (status && !['ongoing', 'completed', 'hiatus', 'cancelled'].includes(status)) throw new Error('Invalid status.');
+    const orders = {popular: ['followedCount', 'desc'], latest: ['latestUploadedChapter', 'desc'],
+      newest: ['createdAt', 'desc'], title: ['title', 'asc']};
+    if (sort && !Object.hasOwn(orders, sort)) throw new Error('Invalid sort order.');
+    const order = sort ? orders[sort] : [term ? 'relevance' : 'followedCount', 'desc'];
     const parameters = [
       ['limit', 50], ['contentRating[]', 'safe'], ['availableTranslatedLanguage[]', language],
       ['includes[]', 'author'], ['includes[]', 'artist'], ['includes[]', 'cover_art'],
-      [term ? 'order[relevance]' : 'order[followedCount]', 'desc']
+      ['order[' + order[0] + ']', order[1]]
     ];
     if (term) parameters.push(['title', term]);
+    for (const tag of new Set(selectedTags)) parameters.push(['includedTags[]', uuid(tag)]);
+    if (selectedTags.length) parameters.push(['includedTagsMode', tagMode]);
+    if (status) parameters.push(['status[]', status]);
     const response = await getJSON(api, '/manga', parameters);
     if (!Array.isArray(response.data)) throw new Error('MangaDex returned an invalid title list.');
     return response.data.filter(item => item.type === 'manga' && item.attributes?.contentRating === 'safe')
