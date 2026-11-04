@@ -65,6 +65,10 @@ function chapterTitle(attributes) {
   return parts.join(' · ') || (language === 'de' ? 'Einzelkapitel' : 'One-shot');
 }
 
+function contentRatings(allowNSFW) {
+  return allowNSFW === 'true' ? ['safe', 'suggestive', 'erotica', 'pornographic'] : ['safe'];
+}
+
 const source = {
   async filters(_, api) {
     const response = await getJSON(api, '/manga/tag');
@@ -79,7 +83,7 @@ const source = {
     };
   },
 
-  async search({ query, tags = '[]', tagMode = 'AND', status = '', sort = '' }, api) {
+  async search({ query, allowNSFW = 'false', tags = '[]', tagMode = 'AND', status = '', sort = '' }, api) {
     const term = String(query || '').trim();
     const selectedTags = JSON.parse(tags);
     if (!Array.isArray(selectedTags) || selectedTags.length > 500) throw new Error('Invalid tags.');
@@ -90,7 +94,7 @@ const source = {
     if (sort && !Object.hasOwn(orders, sort)) throw new Error('Invalid sort order.');
     const order = sort ? orders[sort] : [term ? 'relevance' : 'followedCount', 'desc'];
     const parameters = [
-      ['limit', 50], ['contentRating[]', 'safe'], ['availableTranslatedLanguage[]', language],
+      ['limit', 50], ...contentRatings(allowNSFW).map(rating => ['contentRating[]', rating]), ['availableTranslatedLanguage[]', language],
       ['includes[]', 'author'], ['includes[]', 'artist'], ['includes[]', 'cover_art'],
       ['order[' + order[0] + ']', order[1]]
     ];
@@ -100,7 +104,7 @@ const source = {
     if (status) parameters.push(['status[]', status]);
     const response = await getJSON(api, '/manga', parameters);
     if (!Array.isArray(response.data)) throw new Error('MangaDex returned an invalid title list.');
-    return response.data.filter(item => item.type === 'manga' && item.attributes?.contentRating === 'safe')
+    return response.data.filter(item => item.type === 'manga' && contentRatings(allowNSFW).includes(item.attributes?.contentRating))
       .map(item => {
         uuid(item.id);
         const attributes = item.attributes;
@@ -120,11 +124,11 @@ const source = {
       });
   },
 
-  async chapters({ mangaID }, api) {
+  async chapters({ mangaID, allowNSFW = 'false' }, api) {
     uuid(mangaID);
     const manga = await getJSON(api, '/manga/' + mangaID);
-    if (manga.data?.attributes?.contentRating !== 'safe') {
-      throw new Error('This source only includes titles rated Safe by MangaDex.');
+    if (!contentRatings(allowNSFW).includes(manga.data?.attributes?.contentRating)) {
+      throw new Error('This title is hidden by the source content setting. Enable NSFW content in this source to read it.');
     }
     const results = new Map();
     let offset = 0;
@@ -132,7 +136,7 @@ const source = {
     while (offset < total) {
       const parameters = [
         ['limit', 500], ['offset', offset], ['translatedLanguage[]', language],
-        ['contentRating[]', 'safe'], ['includes[]', 'scanlation_group'], ['includes[]', 'user'],
+        ...contentRatings(allowNSFW).map(rating => ['contentRating[]', rating]), ['includes[]', 'scanlation_group'], ['includes[]', 'user'],
         ['order[volume]', 'asc'], ['order[chapter]', 'asc'], ['order[createdAt]', 'asc'],
         ['includeEmptyPages', '0'], ['includeExternalUrl', '0'], ['includeFuturePublishAt', '0'],
         ['includeFutureUpdates', '0'], ['includeUnavailable', '0']
@@ -162,13 +166,13 @@ const source = {
     return [...results.values()];
   },
 
-  async pages({ mangaID, chapterID }, api) {
+  async pages({ mangaID, chapterID, allowNSFW = 'false' }, api) {
     uuid(mangaID); uuid(chapterID);
     const chapter = await getJSON(api, '/chapter/' + chapterID, [
       ['includes[]', 'manga'], ['includes[]', 'scanlation_group']
     ]);
     const manga = relationships(chapter.data || {}, 'manga').find(item => item.id === mangaID);
-    if (chapter.data?.id !== chapterID || !manga || manga.attributes?.contentRating !== 'safe' || !readable(chapter.data)) {
+    if (chapter.data?.id !== chapterID || !manga || !contentRatings(allowNSFW).includes(manga.attributes?.contentRating) || !readable(chapter.data)) {
       throw new Error('This chapter is no longer available through this source. Open the title again.');
     }
     const response = await getJSON(api, '/at-home/server/' + chapterID, [['forcePort443', 'true']]);

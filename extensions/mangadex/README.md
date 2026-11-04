@@ -23,7 +23,10 @@ are permitted. The installation screen explains the subdomain permission.
   and popular/recently updated/recently added/title sorting, combined with title search.
   Requires a Sumi build with catalog filters. Existing installations must refresh the
   repository and explicitly install the updated source.
-- MangaDex **Safe** titles, with the rating checked again before chapters and pages.
+- Version 1.2.0: **Show NSFW content** in the source catalog includes Safe, Suggestive,
+  Erotica and Pornographic ratings. Requires a Sumi build with per-source NSFW settings
+  and explicitly installing the updated adapter. Off by default (Safe only); the
+  saved setting is checked for search, chapters and pages.
 - All available feed pages in reading order, up to Sumi's 10,000-entry chapter limit.
 - Chapter credits naming MangaDex and available scanlation groups or uploaders.
 - Actual MangaDex@Home image-server URLs, using data-saver images when available.

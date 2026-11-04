@@ -50,6 +50,19 @@ for (const manifest of repository.extensions) {
   assert.equal(titles[0].author, 'Author');
   assert.equal(titles[0].genre, 'Adventure');
   assert.match(titles[0].cover, /\.256\.jpg$/);
+  const ratings = ['safe', 'suggestive', 'erotica', 'pornographic'];
+  const ratedTitles = ratings.map((rating, index) => ({...title, id: chapterID(90 + index),
+    attributes: {...title.attributes, contentRating: rating}}));
+  for (const allowNSFW of [undefined, 'false', 'true', 'yes', true]) {
+    const expectedRatings = allowNSFW === 'true' ? ratings : ['safe'];
+    const found = await call('search', {allowNSFW, tags: JSON.stringify([chapterID(80)]), status: 'completed'}, url => {
+      assert.deepEqual(url.searchParams.getAll('contentRating[]'), expectedRatings);
+      assert.equal(url.searchParams.get('status[]'), 'completed');
+      return ok([...ratedTitles, {...title, attributes: {...title.attributes, contentRating: 'unknown'}}]);
+    });
+    assert.equal(found.length, expectedRatings.length);
+  }
+
   const noCover = structuredClone(title); noCover.relationships = [];
   const fallback = await call('search', {query: ''}, url => {
     assert.equal(url.searchParams.get('order[followedCount]'), 'desc');
@@ -119,6 +132,26 @@ for (const manifest of repository.extensions) {
   };
   const pages = await call('pages', {mangaID: book, chapterID: chapterID(11)}, pagesHandler(atHome));
   assert.deepEqual(pages, ['https://node.mangadex.network/temporary-token/data-saver/' + 'a'.repeat(32) + '/small.jpg']);
+  for (const rating of ratings.slice(1)) {
+    const ratedTitle = {...title, attributes: {...title.attributes, contentRating: rating}};
+    const ratedChapter = structuredClone(chapterData);
+    ratedChapter.relationships.find(item => item.type === 'manga').attributes.contentRating = rating;
+    const ratedHandler = url => {
+      if (url.pathname === '/manga/' + book) return ok(ratedTitle);
+      if (url.pathname.endsWith('/feed')) {
+        assert.deepEqual(url.searchParams.getAll('contentRating[]'), ratings);
+        return {result: 'ok', data: [ratedChapter], offset: 0, total: 1};
+      }
+      if (url.pathname.startsWith('/chapter/')) return ok(ratedChapter);
+      return atHome;
+    };
+    for (const allowNSFW of [undefined, 'false']) {
+      await assert.rejects(call('chapters', {mangaID: book, allowNSFW}, ratedHandler), /content setting/);
+      await assert.rejects(call('pages', {mangaID: book, chapterID: chapterID(11), allowNSFW}, ratedHandler), /no longer available/);
+    }
+    assert.equal((await call('chapters', {mangaID: book, allowNSFW: 'true'}, ratedHandler)).length, 1);
+    assert.deepEqual(await call('pages', {mangaID: book, chapterID: chapterID(11), allowNSFW: 'true'}, ratedHandler), pages);
+  }
   const full = structuredClone(atHome); full.chapter.dataSaver = [];
   assert.match((await call('pages', {mangaID: book, chapterID: chapterID(11)}, pagesHandler(full)))[0], /\/data\//);
   for (const baseUrl of ['http://node.mangadex.network', 'https://mangadex.network.evil.org',
@@ -139,7 +172,7 @@ for (const manifest of repository.extensions) {
     assert.deepEqual(url.searchParams.getAll('excludedGroups[]'), [group]);
     return response({result: 'ok', data: [chapter(11, language)], offset: 0, total: 1});
   }}), /Keine direkt|No directly/);
-  console.log(`PASS: MangaDex ${language}: manifest integrity, localized search, safe filter, feed pagination, credits, removal filter, valid image URLs and errors`);
+  console.log(`PASS: MangaDex ${language}: manifest integrity, localized search, persisted content input, default-safe and opt-in ratings across search/chapters/pages, feed pagination, credits, removal filter, valid image URLs and errors`);
 }
 
 if (process.argv.includes('--live')) {
